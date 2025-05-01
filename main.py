@@ -30,14 +30,14 @@ def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)
 
             query = """
             SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
-            FROM snore_events
+            FROM SnoreLogs
             WHERE timestamp BETWEEN ? AND ?
             """
             cursor.execute(query, (start_dt, end_dt))
         else:
             query = """
             SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
-            FROM snore_events
+            FROM SnoreLogs
             """
             cursor.execute(query)
 
