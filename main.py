@@ -2,10 +2,10 @@ from fastapi import FastAPI, Query
 from datetime import datetime
 import pyodbc
 import os
+import json
 
 app = FastAPI()
 
-# Biến môi trường kết nối SQL Server
 server = os.getenv("SQL_SERVER")
 database = os.getenv("SQL_DATABASE")
 username = os.getenv("SQL_USERNAME")
@@ -17,18 +17,14 @@ conn_str = (
     f"UID={username};PWD={password}"
 )
 
-@app.get("/data")
-def get_snore_data(start: str = Query(...), end: str = Query(...)):
+@app.get("/ahi")
+def get_ahi_with_data(start: str = Query(...), end: str = Query(...)):
     try:
-        # Parse ISO time
         start_dt = datetime.fromisoformat(start)
         end_dt = datetime.fromisoformat(end)
-
-        # Kết nối DB
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
-        # Truy vấn tất cả dữ liệu trong khoảng thời gian
         query = """
         SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
         FROM snore_events
@@ -37,38 +33,28 @@ def get_snore_data(start: str = Query(...), end: str = Query(...)):
         cursor.execute(query, (start_dt, end_dt))
         rows = cursor.fetchall()
 
-        result = []
         apnea_count = 0
+        data = []
 
         for row in rows:
-            device_id, timestamp, snoring_level, intervention, snoring_endtime = row
-
-            # Chuyển timestamp -> datetime để tính AHI
-            try:
-                start_time = datetime.fromisoformat(str(timestamp))
-                end_time = datetime.fromisoformat(str(snoring_endtime))
-            except Exception:
-                continue  # bỏ qua nếu định dạng sai
-
+            start_time = row.timestamp
+            end_time = row.snoringEndtime
             duration = (end_time - start_time).total_seconds()
 
-            # Đếm nếu thời gian ngáy >= 10 giây → coi như 1 đợt apnea
-            if duration >= 10:
+            if duration >= 10:  # giả định >10s là apnea
                 apnea_count += 1
 
-            result.append({
-                "deviceId": device_id,
-                "timestamp": str(timestamp),
-                "snoringLevel": snoring_level,
-                "intervention": intervention,
-                "snoringEndtime": str(snoring_endtime)
+            data.append({
+                "deviceId": row.deviceId,
+                "timestamp": start_time.isoformat(),
+                "snoringLevel": row.snoringLevel,
+                "intervention": row.intervention,  # raw JSON string
+                "snoringEndtime": end_time.isoformat()
             })
 
-        # Tính AHI
         hours = (end_dt - start_dt).total_seconds() / 3600
         ahi = apnea_count / hours if hours > 0 else 0
 
-        # Phân loại mức độ
         if ahi < 5:
             status = "Normal"
         elif ahi < 15:
@@ -81,8 +67,7 @@ def get_snore_data(start: str = Query(...), end: str = Query(...)):
         return {
             "ahi": round(ahi, 2),
             "status": status,
-            "data": result
+            "data": data
         }
-
     except Exception as e:
         return {"error": str(e)}
