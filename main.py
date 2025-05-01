@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Query
-from datetime import datetime
+from datetime import datetime, timedelta
 import pyodbc
 import os
-import json
 
 app = FastAPI()
 
+# Kết nối CSDL
 server = os.getenv("SQL_SERVER")
 database = os.getenv("SQL_DATABASE")
 username = os.getenv("SQL_USERNAME")
@@ -18,21 +18,30 @@ conn_str = (
 )
 
 @app.get("/ahi")
-def get_ahi_with_data(start: str = Query(...), end: str = Query(...)):
+def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)):
     try:
-        start_dt = datetime.fromisoformat(start)
-        end_dt = datetime.fromisoformat(end)
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
-        query = """
-        SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
-        FROM snore_events
-        WHERE timestamp BETWEEN ? AND ?
-        """
-        cursor.execute(query, (start_dt, end_dt))
-        rows = cursor.fetchall()
+        if start_date and end_date:
+            # Chuyển ngày sang datetime từ 00:00:00 đến 23:59:59
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
 
+            query = """
+            SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
+            FROM snore_events
+            WHERE timestamp BETWEEN ? AND ?
+            """
+            cursor.execute(query, (start_dt, end_dt))
+        else:
+            query = """
+            SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
+            FROM snore_events
+            """
+            cursor.execute(query)
+
+        rows = cursor.fetchall()
         apnea_count = 0
         data = []
 
@@ -41,18 +50,26 @@ def get_ahi_with_data(start: str = Query(...), end: str = Query(...)):
             end_time = row.snoringEndtime
             duration = (end_time - start_time).total_seconds()
 
-            if duration >= 10:  # giả định >10s là apnea
+            if duration >= 10:
                 apnea_count += 1
 
             data.append({
                 "deviceId": row.deviceId,
                 "timestamp": start_time.isoformat(),
                 "snoringLevel": row.snoringLevel,
-                "intervention": row.intervention,  # raw JSON string
+                "intervention": row.intervention,
                 "snoringEndtime": end_time.isoformat()
             })
 
-        hours = (end_dt - start_dt).total_seconds() / 3600
+        if start_date and end_date:
+            hours = (end_dt - start_dt).total_seconds() / 3600
+        else:
+            timestamps = [row.timestamp for row in rows]
+            if len(timestamps) < 2:
+                hours = 1
+            else:
+                hours = (max(timestamps) - min(timestamps)).total_seconds() / 3600
+
         ahi = apnea_count / hours if hours > 0 else 0
 
         if ahi < 5:
@@ -69,5 +86,6 @@ def get_ahi_with_data(start: str = Query(...), end: str = Query(...)):
             "status": status,
             "data": data
         }
+
     except Exception as e:
         return {"error": str(e)}
