@@ -1,11 +1,10 @@
 from fastapi import FastAPI, Query
 from datetime import datetime, timedelta
-import pyodbc
-import os
+import pyodbc, os, json
 
 app = FastAPI()
 
-# Kết nối CSDL
+# DB connection
 server = os.getenv("SQL_SERVER")
 database = os.getenv("SQL_DATABASE")
 username = os.getenv("SQL_USERNAME")
@@ -24,19 +23,18 @@ def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)
         cursor = conn.cursor()
 
         if start_date and end_date:
-            # Chuyển ngày sang datetime từ 00:00:00 đến 23:59:59
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
             end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
 
             query = """
-            SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
+            SELECT deviceId, snoringBegintime, intensity, intervention, snoringEndtime
             FROM SnoreLogs
-            WHERE timestamp BETWEEN ? AND ?
+            WHERE snoringBegintime BETWEEN ? AND ?
             """
             cursor.execute(query, (start_dt, end_dt))
         else:
             query = """
-            SELECT deviceId, timestamp, snoringLevel, intervention, snoringEndtime
+            SELECT deviceId, snoringBegintime, intensity, intervention, snoringEndtime
             FROM SnoreLogs
             """
             cursor.execute(query)
@@ -46,7 +44,7 @@ def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)
         data = []
 
         for row in rows:
-            start_time = row.timestamp
+            start_time = row.snoringBegintime
             end_time = row.snoringEndtime
             duration = (end_time - start_time).total_seconds()
 
@@ -55,16 +53,16 @@ def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)
 
             data.append({
                 "deviceId": row.deviceId,
-                "timestamp": start_time.isoformat(),
-                "snoringLevel": row.snoringLevel,
-                "intervention": row.intervention,
+                "snoringBegintime": start_time.isoformat(),
+                "intensity": row.intensity,
+                "intervention": json.loads(row.intervention) if isinstance(row.intervention, str) else row.intervention,
                 "snoringEndtime": end_time.isoformat()
             })
 
         if start_date and end_date:
             hours = (end_dt - start_dt).total_seconds() / 3600
         else:
-            timestamps = [row.timestamp for row in rows]
+            timestamps = [row.snoringBegintime for row in rows]
             if len(timestamps) < 2:
                 hours = 1
             else:
@@ -89,3 +87,7 @@ def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)
 
     except Exception as e:
         return {"error": str(e)}
+
+    finally:
+        cursor.close()
+        conn.close()
