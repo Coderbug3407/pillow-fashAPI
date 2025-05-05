@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Query
-from datetime import datetime, timedelta
+from datetime import datetime
 import pyodbc, os, json
 
 app = FastAPI()
@@ -17,67 +17,36 @@ conn_str = (
 )
 
 @app.get("/ahi")
-def get_ahi_with_data(start_date: str = Query(None), end_date: str = Query(None)):
+def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query(...)):
     try:
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
-        if start_date and end_date:
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        # Chuyển kiểu dữ liệu
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-            query = """
-            SELECT deviceId, snoringBegintime, intensity, intervention, snoringEndtime
-            FROM SnoreLogs
-            WHERE snoringBegintime BETWEEN ? AND ?
-            """
-            cursor.execute(query, (start_dt, end_dt))
-        else:
-            query = """
-            SELECT deviceId, snoringBegintime, intensity, intervention, snoringEndtime
-            FROM SnoreLogs
-            """
-            cursor.execute(query)
+        # Gọi stored procedure
+        cursor.execute("EXEC GetAHIData ?, ?", start_dt, end_dt)
 
-        rows = cursor.fetchall()
-        apnea_count = 0
+        # Kết quả 1: AHI và status
+        row = cursor.fetchone()
+        ahi = row.ahi
+        status = row.status
+
+        # Di chuyển tới kết quả thứ 2: dữ liệu
+        cursor.nextset()
+        data_rows = cursor.fetchall()
+
         data = []
-
-        for row in rows:
-            start_time = row.snoringBegintime
-            end_time = row.snoringEndtime
-            duration = (end_time - start_time).total_seconds()
-
-            if duration >= 10:
-                apnea_count += 1
-
+        for row in data_rows:
             data.append({
                 "deviceId": row.deviceId,
-                "snoringBegintime": start_time.isoformat(),
+                "snoringBegintime": row.snoringBegintime.isoformat(),
                 "intensity": row.intensity,
                 "intervention": json.loads(row.intervention) if isinstance(row.intervention, str) else row.intervention,
-                "snoringEndtime": end_time.isoformat()
+                "snoringEndtime": row.snoringEndtime.isoformat()
             })
-
-        if start_date and end_date:
-            hours = (end_dt - start_dt).total_seconds() / 3600
-        else:
-            timestamps = [row.snoringBegintime for row in rows]
-            if len(timestamps) < 2:
-                hours = 1
-            else:
-                hours = (max(timestamps) - min(timestamps)).total_seconds() / 3600
-
-        ahi = apnea_count / hours if hours > 0 else 0
-
-        if ahi < 5:
-            status = "Normal"
-        elif ahi < 15:
-            status = "Mild"
-        elif ahi < 30:
-            status = "Moderate"
-        else:
-            status = "Severe"
 
         return {
             "ahi": round(ahi, 2),
