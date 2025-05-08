@@ -2,3 +2,4 @@ fastapi
 uvicorn==0.18.2  # Hoặc một phiên bản ổn định khác
 pyodbc
 azure-cosmos>=4.0.0
+python-dateutil
