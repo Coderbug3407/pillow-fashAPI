@@ -20,22 +20,28 @@ container = database.get_container_client(cosmos_container)
 @app.get("/ahi")
 def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query(...)):
     try:
-        # Chuyển kiểu dữ liệu
+        # Parse thời gian đầu và cuối
         start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
 
-        # Query Cosmos DB để tính toán AHI (sử dụng chỉ snoringBegintime)
+        # Tính tổng thời gian ngủ theo giờ
+        total_sleep_hours = (end_dt - start_dt).total_seconds() / 3600
+
+        if total_sleep_hours <= 0:
+            return {"error": "End date must be after start date."}
+
+        # Query để đếm số lần ngáy
         query = f"""
             SELECT VALUE COUNT(1) 
             FROM c 
             WHERE c.snoringBegintime >= "{start_dt.isoformat()}" AND c.snoringBegintime <= "{end_dt.isoformat()}"
         """
-
-        # Thực hiện truy vấn và lấy kết quả AHI (đếm số tài liệu trong khoảng thời gian)
         ahi_results = list(container.query_items(query=query, enable_cross_partition_query=True))
-        ahi = len(ahi_results)  # Sử dụng số lượng bản ghi làm AHI
+        snore_count = ahi_results[0] if ahi_results else 0
 
-        # Trả về kết quả trong cùng định dạng "data"
+        # Tính AHI
+        ahi = snore_count / total_sleep_hours
+
         return {
             "data": [
                 {
@@ -46,6 +52,7 @@ def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query
 
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.get("/snoring_data")
 def get_snoring_data(start_date: str = Query(...), end_date: str = Query(...)):
