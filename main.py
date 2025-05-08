@@ -3,7 +3,7 @@ from datetime import datetime
 import os
 import json
 from azure.cosmos import CosmosClient, PartitionKey, exceptions
-
+from dateutil import parser
 app = FastAPI()
 
 # DB connection
@@ -51,8 +51,9 @@ def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query
 def get_snoring_data(start_date: str = Query(...), end_date: str = Query(...)):
     try:
         # Chuyển kiểu dữ liệu
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
+
+        start_dt = parser.parse(start_date)
+        end_dt = parser.parse(end_date)
 
         # Query Cosmos DB để lấy dữ liệu ngáy
         query = f"""
