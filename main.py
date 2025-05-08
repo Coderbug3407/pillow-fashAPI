@@ -21,8 +21,8 @@ container = database.get_container_client(cosmos_container)
 def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query(...)):
     try:
         # Chuyển kiểu dữ liệu
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
+        start_dt = parser.parse(start_date)
+        end_dt = parser.parse(end_date)
 
         # Tính tổng số giờ ngủ
         total_hours = (end_dt - start_dt).total_seconds() / 3600.0
