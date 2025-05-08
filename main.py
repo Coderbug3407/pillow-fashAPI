@@ -21,34 +21,25 @@ container = database.get_container_client(cosmos_container)
 def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query(...)):
     try:
         # Chuyển kiểu dữ liệu
-        start_dt = parser.parse(start_date)
-        end_dt = parser.parse(end_date)
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
 
-        # Tính tổng số giờ ngủ
-        total_hours = (end_dt - start_dt).total_seconds() / 3600.0
-        if total_hours == 0:
-            return {"error": "Thời gian ngủ phải lớn hơn 0"}
-
-        # Query Cosmos DB để đếm số sự kiện ngáy
+        # Query Cosmos DB để tính toán AHI (sử dụng chỉ snoringBegintime)
         query = f"""
             SELECT VALUE COUNT(1) 
             FROM c 
             WHERE c.snoringBegintime >= "{start_dt.isoformat()}" AND c.snoringBegintime <= "{end_dt.isoformat()}"
         """
-        count_result = list(container.query_items(query=query, enable_cross_partition_query=True))
 
-        # Số sự kiện ngáy
-        total_snoring_events = count_result[0] if count_result else 0
+        # Thực hiện truy vấn và lấy kết quả AHI (đếm số tài liệu trong khoảng thời gian)
+        ahi_results = list(container.query_items(query=query, enable_cross_partition_query=True))
+        ahi = len(ahi_results)  # Sử dụng số lượng bản ghi làm AHI
 
-        # Tính AHI
-        ahi = total_snoring_events / total_hours
-
+        # Trả về kết quả trong cùng định dạng "data"
         return {
             "data": [
                 {
-                    "ahi": round(ahi, 2),
-                    "total_events": total_snoring_events,
-                    "duration_hours": round(total_hours, 2)
+                    "ahi": round(ahi, 2)
                 }
             ]
         }
