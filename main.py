@@ -1,62 +1,83 @@
 from fastapi import FastAPI, Query
 from datetime import datetime
-import pyodbc, os, json
+import os
+import json
+from azure.cosmos import CosmosClient, PartitionKey, exceptions
 
 app = FastAPI()
 
 # DB connection
-server = os.getenv("SQL_SERVER")
-database = os.getenv("SQL_DATABASE")
-username = os.getenv("SQL_USERNAME")
-password = os.getenv("SQL_PASSWORD")
+cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
+cosmos_key = os.getenv("COSMOS_KEY")
+cosmos_database = os.getenv("COSMOS_DATABASE")
+cosmos_container = os.getenv("COSMOS_CONTAINER")
 
-conn_str = (
-    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-    f"SERVER={server};DATABASE={database};"
-    f"UID={username};PWD={password}"
-)
+# Cosmos DB client setup
+client = CosmosClient(cosmos_endpoint, cosmos_key)
+database = client.get_database_client(cosmos_database)
+container = database.get_container_client(cosmos_container)
 
 @app.get("/ahi")
 def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query(...)):
     try:
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-
         # Chuyển kiểu dữ liệu
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
 
-        # Gọi stored procedure
-        cursor.execute("EXEC GetAHIData ?, ?", start_dt, end_dt)
+        # Query Cosmos DB để tính toán AHI (sử dụng chỉ snoringBegintime)
+        query = f"""
+            SELECT VALUE COUNT(1) 
+            FROM c 
+            WHERE c.snoringBegintime >= "{start_dt.isoformat()}" AND c.snoringBegintime <= "{end_dt.isoformat()}"
+        """
 
-        # Kết quả 1: AHI và status
-        row = cursor.fetchone()
-        ahi = row.ahi
-        status = row.status
+        # Thực hiện truy vấn và lấy kết quả AHI (đếm số tài liệu trong khoảng thời gian)
+        ahi_results = list(container.query_items(query=query, enable_cross_partition_query=True))
+        ahi = len(ahi_results)  # Sử dụng số lượng bản ghi làm AHI
 
-        # Di chuyển tới kết quả thứ 2: dữ liệu
-        cursor.nextset()
-        data_rows = cursor.fetchall()
-
-        data = []
-        for row in data_rows:
-            data.append({
-                "deviceId": row.deviceId,
-                "snoringBegintime": row.snoringBegintime.isoformat(),
-                "intensity": row.intensity,
-                "intervention": json.loads(row.intervention) if isinstance(row.intervention, str) else row.intervention,
-                "snoringEndtime": row.snoringEndtime.isoformat()
-            })
-
+        # Trả về kết quả trong cùng định dạng "data"
         return {
-            "ahi": round(ahi, 2),
-            "status": status,
-            "data": data
+            "data": [
+                {
+                    "ahi": round(ahi, 2)
+                }
+            ]
         }
 
     except Exception as e:
         return {"error": str(e)}
 
-    finally:
-        cursor.close()
-        conn.close()
+@app.get("/snoring_data")
+def get_snoring_data(start_date: str = Query(...), end_date: str = Query(...)):
+    try:
+        # Chuyển kiểu dữ liệu
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d %H:%M")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d %H:%M")
+
+        # Query Cosmos DB để lấy dữ liệu ngáy
+        query = f"""
+            SELECT c.id, c.deviceId, c.snoringBegintime, c.intensity, c.intervention, c.snoringEndtime
+            FROM c 
+            WHERE c.snoringBegintime >= "{start_dt.isoformat()}" AND c.snoringBegintime <= "{end_dt.isoformat()}"
+        """
+
+        # Thực hiện truy vấn để lấy các bản ghi
+        data_rows = list(container.query_items(query=query, enable_cross_partition_query=True))
+
+        data = []
+        for row in data_rows:
+            data.append({
+                "id": row["id"],
+                "deviceId": row["deviceId"],
+                "snoringBegintime": row["snoringBegintime"],
+                "intensity": row["intensity"],
+                "intervention": row["intervention"],
+                "snoringEndtime": row["snoringEndtime"]
+            })
+
+        return {
+            "data": data
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
