@@ -17,7 +17,7 @@ client = CosmosClient(cosmos_endpoint, cosmos_key)
 database = client.get_database_client(cosmos_database)
 container = database.get_container_client(cosmos_container)
 
-@app.get("/ahi")
+@app.get("/str")
 def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query(...)):
     try:
         # Parse thời gian đầu và cuối
@@ -45,7 +45,7 @@ def get_ahi_with_stored_proc(start_date: str = Query(...), end_date: str = Query
         return {
             "data": [
                 {
-                    "ahi": round(ahi, 2)
+                    "str": round(ahi, 2)
                 }
             ]
         }
